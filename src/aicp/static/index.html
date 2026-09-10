@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI reliability control plane — engineering console</title>
+  <style>
+    :root {
+      --bg: #0f1412;
+      --panel: #171d1a;
+      --ink: #e7efe8;
+      --muted: #8a9a90;
+      --line: #2a3530;
+      --run: #c4a35a;
+      --ok: #6fba86;
+      --bad: #d46a5c;
+      --info: #6aa3b5;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    header { padding: 18px 22px 12px; border-bottom: 1px solid var(--line); }
+    header h1 { margin: 0 0 6px; font-size: 18px; letter-spacing: 0.04em; font-weight: 600; }
+    header p { margin: 0; color: var(--muted); max-width: 90ch; }
+    .guarantee { color: var(--run); }
+    main { display: grid; grid-template-columns: 320px 1fr 1fr; min-height: calc(100vh - 96px); }
+    @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+    section { border-right: 1px solid var(--line); padding: 16px; overflow: auto; }
+    section:last-child { border-right: 0; }
+    h2 { margin: 18px 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+    h2:first-child { margin-top: 0; }
+    label { display: block; color: var(--muted); font-size: 11px; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: 0.08em; }
+    input, select, textarea, button {
+      font: inherit; color: var(--ink); background: #101613; border: 1px solid var(--line); border-radius: 2px;
+    }
+    input, select, textarea { width: 100%; padding: 7px 8px; }
+    textarea { min-height: 72px; }
+    button { padding: 7px 10px; cursor: pointer; background: #24302a; }
+    button:hover { border-color: var(--run); }
+    button.danger { color: var(--bad); }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .kv { color: var(--muted); }
+    .flash { color: var(--info); min-height: 1.4em; margin-top: 8px; }
+    .card { border: 1px solid var(--line); padding: 10px; margin-bottom: 8px; }
+    .card.active { border-color: var(--run); }
+    .status { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .ok { color: var(--ok); }
+    .error, .blocked, .killed { color: var(--bad); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    code { color: var(--run); }
+    .empty { color: var(--muted); padding: 8px 0; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #101613; padding: 8px; border: 1px solid var(--line); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI reliability control plane</h1>
+    <p>
+      Applications call <code>complete(feature, tenant, input, timeout)</code>.
+      This console is for <span class="guarantee">policy, budgets, traces, and eval gates</span> —
+      not a chat window. Kill a feature, exhaust a budget, and watch a weak eval almost ship a leaked prefix.
+    </p>
+  </header>
+  <main>
+    <section>
+      <h2>complete()</h2>
+      <label>Feature</label>
+      <select id="feature"></select>
+      <label>Tenant</label>
+      <input id="tenant" value="acme" />
+      <label>Input</label>
+      <textarea id="input">hello</textarea>
+      <label>Timeout ms (optional)</label>
+      <input id="timeout" placeholder="feature default" />
+      <div class="row">
+        <button id="run">Call complete</button>
+        <button id="refresh">Refresh</button>
+      </div>
+      <p class="flash" id="flash"></p>
+      <h2>Last result</h2>
+      <div id="result"><p class="empty">No call yet.</p></div>
+      <div id="demoBox" hidden>
+        <h2>Demo provider</h2>
+        <p class="kv">Inject failure without a real model. Requires <code>DEMO_MODE=true</code>.</p>
+        <div class="row">
+          <button data-mode="ok">ok</button>
+          <button data-mode="fail">fail</button>
+          <button data-mode="fail_once">fail once</button>
+          <button data-mode="slow">slow</button>
+          <button data-mode="rate_limit">rate limit</button>
+        </div>
+        <p class="kv" id="providerState"></p>
+      </div>
+    </section>
+    <section>
+      <h2>Features</h2>
+      <div id="features"><p class="empty">Loading…</p></div>
+      <h2>Prompt versions</h2>
+      <div id="prompts"><p class="empty">Select a feature.</p></div>
+      <h2>Eval / promote</h2>
+      <label>Version</label>
+      <input id="evalVersion" value="2" />
+      <div class="row">
+        <button id="runEval">Run golden eval</button>
+        <button id="runWeak">Run weak eval (contains only)</button>
+        <button id="promote">Promote with last eval id</button>
+      </div>
+      <div id="evalOut"><p class="empty">No eval yet.</p></div>
+    </section>
+    <section>
+      <h2>Traces</h2>
+      <div id="traces"><p class="empty">No traces.</p></div>
+      <h2>Budgets</h2>
+      <div id="budgets"><p class="empty">No reservations this window.</p></div>
+      <h2>Promote events</h2>
+      <div id="promotes"><p class="empty">None.</p></div>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let selected = "support_reply";
+    let lastEvalId = null;
+    let demo = false;
+
+    async function api(path, opts) {
+      const res = await fetch(path, opts);
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { data = { message: text }; }
+      if (!res.ok) {
+        const msg = (data && (data.message || data.code)) || res.statusText;
+        throw new Error(msg);
+      }
+      return data;
+    }
+
+    function flash(msg, bad) {
+      $("flash").textContent = msg || "";
+      $("flash").style.color = bad ? "var(--bad)" : "var(--info)";
+    }
+
+    async function loadFeatures() {
+      const data = await api("/features");
+      const sel = $("feature");
+      sel.innerHTML = "";
+      $("features").innerHTML = "";
+      if (!data.features.length) {
+        $("features").innerHTML = '<p class="empty">No features seeded.</p>';
+        return;
+      }
+      for (const f of data.features) {
+        const opt = document.createElement("option");
+        opt.value = f.name;
+        opt.textContent = f.name;
+        if (f.name === selected) opt.selected = true;
+        sel.appendChild(opt);
+        const div = document.createElement("div");
+        div.className = "card" + (f.name === selected ? " active" : "");
+        div.innerHTML = `<div><strong>${f.name}</strong> v${f.active_version ?? "—"}
+          <span class="status ${f.killed ? "killed" : "ok"}">${f.killed ? "killed" : "live"}</span></div>
+          <div class="kv">model ${f.model} · budget ${f.budget_requests}/window · fail_${f.fail_closed ? "closed" : "open"}</div>
+          <div class="row">
+            <button data-kill="${f.name}">${f.killed ? "Unkill" : "Kill"}</button>
+            <button data-sel="${f.name}">Inspect</button>
+          </div>`;
+        div.querySelector("[data-sel]").onclick = () => { selected = f.name; sel.value = f.name; refresh(); };
+        div.querySelector("[data-kill]").onclick = async () => {
+          const path = f.killed ? `/features/${f.name}/unkill` : `/features/${f.name}/kill`;
+          await api(path, { method: "POST" });
+          flash(`${f.name} ${f.killed ? "unkilled" : "killed"}`);
+          refresh();
+        };
+        $("features").appendChild(div);
+      }
+    }
+
+    async function loadDetail() {
+      const data = await api(`/features/${selected}`);
+      const prompts = data.prompts || [];
+      if (!prompts.length) {
+        $("prompts").innerHTML = '<p class="empty">No prompt versions.</p>';
+      } else {
+        $("prompts").innerHTML = prompts.map(p =>
+          `<div class="card ${p.version === data.feature.active_version || p.id === data.feature.active_version_id ? "active" : ""}">
+            <div>v${p.version} ${p.id === data.feature.active_version_id ? '<span class="status ok">active</span>' : ""}</div>
+            <div class="kv">${(p.body || "").replaceAll("<","&lt;")}</div>
+          </div>`
+        ).join("");
+      }
+      if (data.last_eval) {
+        const e = data.last_eval;
+        $("evalOut").innerHTML = `<div class="card">Last stored eval v${e.version}:
+          <span class="status ${e.blocked ? "blocked" : "ok"}">${e.blocked ? "blocked" : "passed"}</span>
+          ${e.passed}/${e.total} (${(e.pass_rate*100).toFixed(0)}%)</div>`;
+        lastEvalId = e.id;
+      }
+    }
+
+    async function loadTraces() {
+      const data = await api(`/traces?feature=${encodeURIComponent(selected)}&limit=20`);
+      if (!data.traces.length) {
+        $("traces").innerHTML = '<p class="empty">No traces for this feature.</p>';
+        return;
+      }
+      $("traces").innerHTML = `<table><thead><tr><th>status</th><th>tenant</th><th>v</th><th>ms</th><th>class</th></tr></thead><tbody>${
+        data.traces.map(t => `<tr>
+          <td class="status ${t.status}">${t.status}</td>
+          <td>${t.tenant}</td>
+          <td>${t.prompt_version ?? "—"}</td>
+          <td>${Number(t.latency_ms).toFixed(1)}</td>
+          <td>${t.error_class || ""}</td>
+        </tr>`).join("")
+      }</tbody></table>`;
+    }
+
+    async function loadBudgets() {
+      const data = await api("/budgets");
+      if (!data.budgets.length) {
+        $("budgets").innerHTML = '<p class="empty">No reservations this window.</p>';
+        return;
+      }
+      $("budgets").innerHTML = `<table><thead><tr><th>tenant</th><th>feature</th><th>n</th><th>usd</th></tr></thead><tbody>${
+        data.budgets.map(b => `<tr><td>${b.tenant}</td><td>${b.feature}</td><td>${b.request_count}</td><td>${Number(b.spent_usd).toFixed(6)}</td></tr>`).join("")
+      }</tbody></table>`;
+    }
+
+    async function loadPromotes() {
+      const data = await api("/promotes");
+      if (!data.events.length) {
+        $("promotes").innerHTML = '<p class="empty">No promote attempts.</p>';
+        return;
+      }
+      $("promotes").innerHTML = data.events.slice(0, 12).map(e =>
+        `<div class="card"><span class="status ${e.accepted ? "ok" : "blocked"}">${e.accepted ? "accepted" : "refused"}</span>
+         ${e.feature} → v${e.to_version} · ${e.reason || ""}</div>`
+      ).join("");
+    }
+
+    async function maybeDemo() {
+      try {
+        const p = await api("/demo/provider");
+        demo = true;
+        $("demoBox").hidden = false;
+        $("providerState").textContent = `mode=${p.mode} calls=${p.calls}`;
+      } catch {
+        demo = false;
+        $("demoBox").hidden = true;
+      }
+    }
+
+    async function refresh() {
+      try {
+        await loadFeatures();
+        await loadDetail();
+        await loadTraces();
+        await loadBudgets();
+        await loadPromotes();
+        await maybeDemo();
+      } catch (err) {
+        flash(String(err.message || err), true);
+      }
+    }
+
+    $("run").onclick = async () => {
+      try {
+        const timeout = $("timeout").value.trim();
+        const payload = {
+          feature: $("feature").value,
+          tenant: $("tenant").value,
+          input: $("input").value,
+        };
+        if (timeout) payload.timeout_ms = Number(timeout);
+        selected = payload.feature;
+        const out = await api("/complete", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        $("result").innerHTML = `<pre>${JSON.stringify(out, null, 2)}</pre>`;
+        flash(out.ok ? `trace ${out.trace_id}` : `${out.error_class}: ${out.message}`, !out.ok);
+        await refresh();
+      } catch (err) {
+        flash(String(err.message || err), true);
+      }
+    };
+
+    $("refresh").onclick = refresh;
+    $("feature").onchange = () => { selected = $("feature").value; refresh(); };
+
+    async function evalRun(weak) {
+      try {
+        const version = Number($("evalVersion").value);
+        const payload = { version };
+        if (weak) payload.checkers = ["contains"];
+        const out = await api(`/features/${selected}/eval`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        lastEvalId = out.id;
+        $("evalOut").innerHTML = `<div class="card"><div>eval ${out.id}</div>
+          <div class="status ${out.blocked ? "blocked" : "ok"}">${out.blocked ? "BLOCKED" : "GATE PASSED"} ${out.passed}/${out.total} (${(out.pass_rate*100).toFixed(0)}%)</div>
+          <pre>${JSON.stringify(out.details, null, 2)}</pre></div>`;
+        flash(out.blocked ? "promote will refuse this eval" : "eval cleared the threshold");
+        await loadPromotes();
+      } catch (err) {
+        flash(String(err.message || err), true);
+      }
+    }
+
+    $("runEval").onclick = () => evalRun(false);
+    $("runWeak").onclick = () => evalRun(true);
+    $("promote").onclick = async () => {
+      if (!lastEvalId) { flash("run an eval first", true); return; }
+      try {
+        const version = Number($("evalVersion").value);
+        const out = await api(`/features/${selected}/promote`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ version, eval_run_id: lastEvalId }),
+        });
+        flash(`promoted ${selected} to v${out.active_version}`);
+        await refresh();
+      } catch (err) {
+        flash(String(err.message || err), true);
+      }
+    };
+
+    document.querySelectorAll("#demoBox button[data-mode]").forEach(btn => {
+      btn.onclick = async () => {
+        await api("/demo/provider", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mode: btn.dataset.mode }),
+        });
+        flash(`provider mode ${btn.dataset.mode}`);
+        maybeDemo();
+      };
+    });
+
+    refresh();
+    setInterval(() => { loadTraces(); loadBudgets(); }, 4000);
+  </script>
+</body>
+</html>
