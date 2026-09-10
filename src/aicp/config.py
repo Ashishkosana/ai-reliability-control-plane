@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     promote_threshold: float = 0.8
     max_body_bytes: int = 200_000
     demo_mode: bool = False
+    # V2: write traces on a background thread. Budget/kill stay on the hot path.
+    trace_async: bool = True
+    trace_queue_size: int = 4096
 
 
 def load_settings() -> Settings:

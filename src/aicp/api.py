@@ -68,6 +68,9 @@ async def lifespan(_app: FastAPI):  # type: ignore[no-untyped-def]
     settings = load_settings()
     setup_logging(settings.log_level)
     configure_pool(settings.database_url)
+    from aicp.traces import configure as configure_traces
+
+    configure_traces(settings.trace_async, settings.trace_queue_size)
     with get_pool().connection() as conn:
         seed_lab(conn)
     yield

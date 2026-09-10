@@ -18,6 +18,7 @@ BUDGET_REJECT = Counter(
 )
 KILL = Counter("aicp_kill_switch_total", "Killed-feature calls", ["feature"], registry=REGISTRY)
 TRACE_LOSS = Counter("aicp_trace_write_fail_total", "Trace persist failures", registry=REGISTRY)
+TRACE_DROP = Counter("aicp_trace_queue_drop_total", "Async trace queue drops", registry=REGISTRY)
 UNMETERED = Counter("aicp_unmetered_total", "Fail-open unmetered provider calls", registry=REGISTRY)
 COMPLETE_MS = Histogram(
     "aicp_complete_ms",

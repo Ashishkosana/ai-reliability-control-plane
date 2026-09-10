@@ -35,6 +35,7 @@ def database_url() -> str:
     os.environ["API_PORT"] = "43190"
     os.environ["DEMO_MODE"] = "true"
     os.environ["PROMOTE_THRESHOLD"] = "0.8"
+    os.environ["TRACE_ASYNC"] = "false"
     from aicp.db import apply_schema
 
     with connect(TEST_DSN, autocommit=True) as conn:

@@ -22,7 +22,6 @@ from aicp.metrics import (
     KILL,
     OVERHEAD_MS,
     PROVIDER_MS,
-    TRACE_LOSS,
     UNMETERED,
 )
 from aicp.provider import (
@@ -123,12 +122,9 @@ def write_trace(conn: Any, row: dict[str, Any]) -> None:
 
 
 def _safe_trace(row: dict[str, Any]) -> None:
-    try:
-        with get_pool().connection() as conn:
-            write_trace(conn, row)
-    except Exception:
-        TRACE_LOSS.inc()
-        logger.exception("trace write failed")
+    from aicp.traces import enqueue
+
+    enqueue(row)
 
 
 def _base_trace(
