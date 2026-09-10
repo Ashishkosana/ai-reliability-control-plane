@@ -50,15 +50,18 @@ Prompt versions for `support_reply`:
 
 That v2 row is the product. A weak checker would have shipped a leaked assistant prefix.
 
-This is its own git repository. Do not merge it into the workflow-engine remote.
+## Repository
 
-Create a new Origin or GitHub repository named `ai-reliability-control-plane`, then:
+This remote is **Project 2 only**. Project 1 (workflow engine) and Project 3 (`realtime-event-platform`) are different git remotes. Do not merge those codebases into this history.
+
+Create an Origin or GitHub repository named `ai-reliability-control-plane`, then:
 
 ```bash
 git remote add origin <that-repo-url>
 git push -u origin main
 ```
 
+## Run locally
 
 Requires Python 3.12 and PostgreSQL 16. Use a **dedicated database** (`aicp`), not the workflow-engine database.
 
