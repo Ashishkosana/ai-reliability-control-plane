@@ -1,13 +1,43 @@
 # Architecture
 
-```text
-application  →  complete()  →  Postgres (features, budgets, traces)
-                     │
-                     ├─ fake provider (V1 lab)
-                     └─ HTTP adapter (FastAPI) for the console and CLI
+```mermaid
+flowchart LR
+  App[application] --> C["complete()"]
+  C --> PG[(Postgres: features, budgets, prompt versions, traces, evals)]
+  C --> Fake[fake provider — V1 lab]
+  HTTP[FastAPI / CLI] --> C
 ```
 
-The API process does not hide a worker fleet. `complete()` is synchronous. Kill switch, budget, and prompt version are checked in the calling process against Postgres.
+`complete()` is synchronous in the calling process. There is no worker fleet. Kill switch, budget, and prompt version are checked against Postgres before the fake provider runs.
+
+```mermaid
+sequenceDiagram
+  participant App
+  participant Plane as complete()
+  participant PG as Postgres
+  participant P as Fake provider
+  App->>Plane: feature, tenant, input
+  Plane->>PG: load feature
+  alt killed
+    Plane-->>App: kill_switch
+  else
+    Plane->>PG: reserve budget WHERE count < cap
+    alt cap hit
+      Plane-->>App: budget
+    else
+      Plane->>PG: load prompt version body
+      Plane->>P: complete (retry once, fallback unless timeout)
+      Plane->>PG: record spend
+      Plane->>PG: enqueue/write trace hash+preview
+      Plane-->>App: ok or error_class
+    end
+  end
+```
+
+Promote is not this sequence. It is `eval` then a pointer move, refused when the run is blocked or below `PROMOTE_THRESHOLD`.
+
+Default `TRACE_ASYNC=true` writes traces from a bounded in-memory queue. A full queue increments `aicp_trace_queue_drop_total` and still returns the model result. Budget and kill switch stay on the synchronous path. Tests force `TRACE_ASYNC=false`.
+
 
 ## Why Postgres, not Redis
 

@@ -19,10 +19,11 @@
 - In-flight vendor HTTP is cancelled on kill.
 - This repository includes the workflow engine.
 
-## Open gaps that are not V2 yet
+- Async traces: bounded queue (`TRACE_ASYNC=true` default; tests force false).
+
+## Open gaps that are not further V2 yet
 
 - Real SDK error classification (need a vendor, or recorded fixtures).
-- Async trace append if sync insert ever shows up in a *real* provider overhead split.
 - Authn on the HTTP adapter.
 
-V1 holds for the laboratory we ran. See [V2_PROPOSAL.md](V2_PROPOSAL.md).
+V2 async trace append is implemented. See [V2_PROPOSAL.md](V2_PROPOSAL.md). The laboratory still holds for the drills we ran.

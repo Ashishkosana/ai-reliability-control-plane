@@ -57,4 +57,4 @@ Sum of `aicp_traces.cost_usd` vs `estimate_cost(model, sum tokens_in, sum tokens
 
 ## Interpretation
 
-V1 holds for the laboratory. The fake provider is the right dependency until a drill needs a vendor error shape. No V2.
+Interpretation: the laboratory still holds. The fake provider is the right dependency until a drill needs a vendor error shape. V2 (async traces) does not change the budget or kill-switch path; do not read this table as a reason to add Redis.
